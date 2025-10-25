@@ -1,6 +1,16 @@
+from scapy.all import *
 import curses
 
 stdscr = curses.initscr()
+
+try:
+    while True:
+        
+
+except KeyboardInterrupt:
+    print("Program stopped")
+
+
 
 '''
 - use ethernet frame layer

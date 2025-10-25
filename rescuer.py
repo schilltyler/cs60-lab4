@@ -1,14 +1,19 @@
 from scapy.all import *
 import curses
 
-stdscr = curses.initscr()
+#stdscr = curses.initscr()
 
-try:
-    while True:
-        
+def print_packet(packet):
+    output.append(packet.dBm_AntSignal)
+    output.append(packet.src)
 
-except KeyboardInterrupt:
-    print("Program stopped")
+capture = sniff(iface="wlp0s20f0u9")
+output = []
+#capture = sniff(prn=print_packet)
+#sniff(prn=print_packet)
+print(output)
+#capture.summary()
+
 
 
 

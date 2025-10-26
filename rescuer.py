@@ -1,20 +1,35 @@
 from scapy.all import *
 import curses
+import threading
+from queue import Queue
 
-#stdscr = curses.initscr()
+def ncurses(q):
+    stdscr = curses.initscr()
+
+    while True:
+        data = q.get()
+        stdscr.addstr(data)
+        stdscr.refresh()
 
 def print_packet(packet):
-    output.append(packet.dBm_AntSignal)
-    output.append(packet.src)
+    #output.append(packet.dBm_AntSignal)
+    #output.append(packet.src)
+    if packet.src == "EF:53:3F:92:34:EF":
+        q.put(packet.dBM_AntSignal)
 
-capture = sniff(iface="wlp0s20f0u9")
-output = []
-#capture = sniff(prn=print_packet)
-#sniff(prn=print_packet)
-print(output)
-#capture.summary()
+def sniffer(q):
+    capture = sniff(iface="wlp0s20f0u9", prn=print_packet)
+    #output = []
+    #print(output)
 
+# queue to safely send packet rssi between threads
+q = Queue()
 
+thread1 = threading.Thread(target=ncurses, args=(q, ))
+thread2 = threading.Thread(target=sniffer, args=(q, ))
+
+thread1.start()
+thread2.start()
 
 
 '''

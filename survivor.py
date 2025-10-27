@@ -1,12 +1,15 @@
 from scapy.all import *
 
-# ether destination is random MAC I got from searching random MAC online
-#frame = RadioTap() / Ether(dst="EF:53:3F:92:34:EF", src="96:66:7b:64:96:f0")
-dot11 = Dot11(type=0, subtype=8, addr1="ff:ff:ff:ff:ff:ff", addr2="08:00:27:6e:81:3e", addr3="08:00:27:6e:81:3e")
-frame = RadioTap()/dot11
+dot11 = Dot11(type=0, subtype=8, addr1="ff:ff:ff:ff:ff:ff",
+              addr2="08:00:27:6e:81:3e", addr3="08:00:27:6e:81:3e")
+
+beacon = Dot11Beacon(cap="ESS")
+essid = Dot11Elt(ID="SSID", info="Survivor Beacon", len=15)
+
+frame = RadioTap()/dot11/beacon/essid
+
 try:
     while True:
-        sendp(frame, verbose=False)
-
+        sendp(frame, iface="wlxbc071d297881", inter=0.1, loop=1, verbose=False)
 except KeyboardInterrupt:
-    print("Program stopped")
+    print("Stopped beacon transmission")

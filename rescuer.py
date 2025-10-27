@@ -7,11 +7,17 @@ output = []
 
 def ncurses(q):
     stdscr = curses.initscr()
+    curses.noecho()
+    curses.cbreak()
+    stdscr.scrollok(True)
 
-    while True:
-        data = q.get()
-        stdscr.addstr(data)
-        stdscr.refresh()
+    try:
+        while True:
+            data = q.get()
+            stdscr.addstr(f"{data}\n")
+            stdscr.refresh()
+    except KeyboardInterrupt:
+        curses.endwin()
 
 def print_packet(packet):
     # Only process Dot11 frames (monitor mode)
@@ -25,48 +31,18 @@ def print_packet(packet):
                 output.append(rssi)
 
 def sniffer(q):
-    sniff(iface="wlxbc071d297881", prn=print_packet)
-    #output = []
-    #print(output)
+    sniff(iface="wlxbc071d297881", prn=print_packet, store=False)
 
-# queue to safely send packet rssi between threads
 q = Queue()
 
-thread1 = threading.Thread(target=ncurses, args=(q, ))
-thread2 = threading.Thread(target=sniffer, args=(q, ))
+thread1 = threading.Thread(target=ncurses, args=(q,))
+thread2 = threading.Thread(target=sniffer, args=(q,))
 
 thread1.start()
 thread2.start()
 
-print(output)
-
-
-'''
-- use ethernet frame layer
-- you get a src and dest MAC
-- given that the rescuers will be in monitor mode,
-we just need to send to any MAC address, don't need
-to broadcast
-- we can look at the IAAA website and find a MAC address
-that has a high likelyhood of not being used
-- there is a very VERY small chance that someone shows up
-on the network with that MAC address, so you could just stop here
-- however, if you really want to be sure, you can add some bytes
-in the payload that say "hey I'm a survivor beacon"
-'''
-
-'''
-How do we construct our survivor program?
-Do we want to create a ping-like program?
-What is a RadioTap header?
-- When you send a RadioTap header it will track RSSI and other
-data
-'''
-
-'''
-How do we look through network traffic?
-Could we make this easier by going up to the tcp layer
-in the previous part, and thus we have a port to listen on?
-How do we measure RSSI?
-- Scapy has a layer for RSSI
-'''
+try:
+    thread1.join()
+    thread2.join()
+except KeyboardInterrupt:
+    print("\nProgram stopped")

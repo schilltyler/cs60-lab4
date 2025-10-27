@@ -14,14 +14,18 @@ def ncurses(q):
         stdscr.refresh()
 
 def print_packet(packet):
-    #output.append(packet.dBm_AntSignal)
-    #output.append(packet.src)
-    if packet.dst == "EF:53:3F:92:34:EF":
-        q.put(packet.dBM_AntSignal)
-        output.append(packet.dBM_AntSignal)
+    # Only process Dot11 frames (monitor mode)
+    if packet.haslayer(Dot11):
+        # Compare against the beacon’s destination MAC
+        if packet.addr1 == "EF:53:3F:92:34:EF":
+            # Safely get RSSI (may not exist on all drivers)
+            if hasattr(packet, 'dBm_AntSignal'):
+                rssi = packet.dBm_AntSignal
+                q.put(f"RSSI: {rssi} dBm")
+                output.append(rssi)
 
 def sniffer(q):
-    sniff(iface="wlp0s20f0u9", prn=print_packet)
+    sniff(iface="wlxbc071d297881", prn=print_packet)
     #output = []
     #print(output)
 

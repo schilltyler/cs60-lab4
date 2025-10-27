@@ -3,6 +3,8 @@ import curses
 import threading
 from queue import Queue
 
+output = []
+
 def ncurses(q):
     stdscr = curses.initscr()
 
@@ -14,11 +16,12 @@ def ncurses(q):
 def print_packet(packet):
     #output.append(packet.dBm_AntSignal)
     #output.append(packet.src)
-    if packet.src == "EF:53:3F:92:34:EF":
+    if packet.dst == "EF:53:3F:92:34:EF":
         q.put(packet.dBM_AntSignal)
+        output.append(packet.dBM_AntSignal)
 
 def sniffer(q):
-    capture = sniff(iface="wlp0s20f0u9", prn=print_packet)
+    sniff(iface="wlp0s20f0u9", prn=print_packet)
     #output = []
     #print(output)
 
@@ -30,6 +33,8 @@ thread2 = threading.Thread(target=sniffer, args=(q, ))
 
 thread1.start()
 thread2.start()
+
+print(output)
 
 
 '''

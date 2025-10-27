@@ -20,14 +20,12 @@ def ncurses(q):
         curses.endwin()
 
 def print_packet(packet):
-    # Only process Dot11 frames (monitor mode)
-    if packet.haslayer(Dot11):
-        # Compare against the beacon’s destination MAC
-        if packet.addr1 == "EF:53:3F:92:34:EF":
-            # Safely get RSSI (may not exist on all drivers)
-            if hasattr(packet, 'dBm_AntSignal'):
-                rssi = packet.dBm_AntSignal
-                q.put(f"RSSI: {rssi} dBm")
+    if packet.haslayer(Dot11Beacon) and packet.haslayer(Dot11Elt):
+        ssid = packet[Dot11Elt].info.decode(errors="ignore")
+        if ssid == "Survivor Beacon":
+            rssi = getattr(packet, 'dBm_AntSignal', None)
+            if rssi is not None:
+                q.put(f"Beacon from {packet.addr2} | RSSI: {rssi} dBm")
                 output.append(rssi)
 
 def sniffer(q):

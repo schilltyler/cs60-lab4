@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """
-key_exchange.py -- Part 2: Secret key generation by rapid RSSI exchange (threaded role election).
+key_exchange.py -- Part 2: Secret key generation by rapid RSSI exchange (threaded RSSI measurement).
 
-Usage (example):
+Usage:
   sudo python3 key_exchange.py --iface wlan0 --n 300 --listen 2 --per-index-timeout 0.5
+
+Notes:
+ - Interface must be in monitor mode on the same channel on both devices.
+ - Run the same program on both devices; roles are determined dynamically by packet flow.
+ - Outputs:
+    initiator_samples.json
+    responder_samples.json
 """
 
 import argparse
@@ -11,7 +18,7 @@ import json
 import threading
 import time
 from queue import Queue, Empty
-from scapy.all import RadioTap, Dot11, Dot11Beacon, Dot11Elt, sniff, sendp, get_if_hwaddr
+from scapy.all import RadioTap, Dot11, Dot11Beacon, Dot11Elt, sniff, sendp
 from random import randint
 
 # ---------- Globals ----------
@@ -22,23 +29,21 @@ tx_queue = Queue()
 observed_by_initiator = {}
 observed_by_responder = {}
 
-role_lock = threading.Lock()
-role = "unknown"
-heard_ready_begin = threading.Event()
-heard_ready_exchange = threading.Event()
+responder_flag = threading.Event()  # True if this device becomes responder
+initiator_ready = threading.Event()  # True if initiator received responder's ack
 
+IDX_ELT_ID = 221
 SSID_READY_BEGIN = b"Ready to Begin"
 SSID_READY_EXCHANGE = b"Ready to Exchange"
-IDX_ELT_ID = 221
 
 
 # ---------- Helper functions ----------
 def safe_get_iface_mac(iface: str) -> str:
-    """Get interface MAC address safely, even in monitor mode."""
+    """Get interface MAC safely. Return random locally-administered MAC if fails."""
+    from scapy.all import get_if_hwaddr
     try:
         return get_if_hwaddr(iface)
     except Exception:
-        # Generate a random locally administered MAC if unavailable
         rand_mac = "02:%02x:%02x:%02x:%02x:%02x" % tuple(randint(0, 255) for _ in range(5))
         print(f"[warn] Could not get MAC for {iface}, using {rand_mac}")
         return rand_mac
@@ -87,22 +92,30 @@ def get_rssi(packet):
     return None
 
 
-# ---------- Handlers ----------
+# ---------- Packet Handlers ----------
 def negotiation_handler(packet):
-    if not packet.haslayer(Dot11Beacon):
-        return
+    """Handle role negotiation beacons."""
     ssid = get_ssid_from_packet(packet)
     if not ssid:
         return
+
+    # Become responder if we see "Ready to Begin"
     if ssid == SSID_READY_BEGIN:
-        heard_ready_begin.set()
+        if not responder_flag.is_set():
+            responder_flag.set()
+            # Immediately send ACK to initiator
+            iface_mac = safe_get_iface_mac(args.iface)
+            ack_frame = build_beacon_frame(iface_mac, SSID_READY_EXCHANGE)
+            tx_queue.put(ack_frame)
+            print("[role] Detected peer 'Ready to Begin'. Acting as responder.")
     elif ssid == SSID_READY_EXCHANGE:
-        heard_ready_exchange.set()
+        # Initiator sees ACK
+        initiator_ready.set()
+        print("[role] Detected peer 'Ready to Exchange'. Acting as initiator.")
 
 
 def responder_handler(packet):
-    if not packet.haslayer(Dot11Beacon):
-        return
+    """Collect RSSI samples as responder."""
     idx = get_index_from_packet(packet)
     if idx is None:
         return
@@ -115,8 +128,7 @@ def responder_handler(packet):
 
 
 def initiator_reply_handler(packet):
-    if not packet.haslayer(Dot11Beacon):
-        return
+    """Collect RSSI samples as initiator."""
     ssid = get_ssid_from_packet(packet)
     if ssid != SSID_READY_EXCHANGE:
         return
@@ -127,7 +139,7 @@ def initiator_reply_handler(packet):
     observed_by_initiator[idx] = rssi
 
 
-# ---------- TX worker ----------
+# ---------- TX Worker ----------
 def tx_worker():
     while not stop_event.is_set():
         try:
@@ -142,66 +154,30 @@ def tx_worker():
             tx_queue.task_done()
 
 
-# ---------- Threaded Role Election ----------
-def threaded_role_election(listen_time=2.0):
-    """
-    Both devices run this concurrently:
-      - Each starts sending 'Ready to Begin'
-      - Each also listens for peer's 'Ready to Begin'
-      - The first to *hear* the other switches to responder
-      - If both hear each other, use MAC tie-breaker to decide roles
-    """
-    global role
+# ---------- Role Election ----------
+def negotiate_role(listen_time=2.0):
+    """Sniff first, then send if needed. Determines initiator/responder via packet flow."""
     iface_mac = safe_get_iface_mac(args.iface)
-    peer_macs = set()
 
-    def broadcaster():
-        frame = build_beacon_frame(iface_mac, SSID_READY_BEGIN)
-        while not heard_ready_begin.is_set() and not stop_event.is_set():
-            tx_queue.put(frame)
+    def sniffer():
+        sniff(iface=args.iface, prn=negotiation_handler, store=False, timeout=listen_time)
+
+    sniff_thread = threading.Thread(target=sniffer, daemon=True)
+    sniff_thread.start()
+
+    # Wait briefly to see if we detect a peer
+    time.sleep(listen_time)
+
+    if not responder_flag.is_set():
+        # We didn't see any "Ready to Begin" -> we become initiator
+        print("[role] No peer detected -> acting as initiator.")
+        initiator_frame = build_beacon_frame(iface_mac, SSID_READY_BEGIN)
+        while not initiator_ready.is_set() and not stop_event.is_set():
+            tx_queue.put(initiator_frame)
             time.sleep(0.1)
-
-    def listener():
-        def detect_peers(packet):
-            if not packet.haslayer(Dot11Beacon):
-                return
-            ssid = get_ssid_from_packet(packet)
-            if ssid == SSID_READY_BEGIN:
-                heard_ready_begin.set()
-                # Record the sender MAC for tie-breaker
-                if packet.addr2:
-                    peer_macs.add(packet.addr2.lower())
-        sniff(iface=args.iface, prn=detect_peers, timeout=listen_time, store=False)
-
-    tb = threading.Thread(target=broadcaster, daemon=True)
-    tl = threading.Thread(target=listener, daemon=True)
-    tb.start()
-    tl.start()
-
-    tl.join(timeout=listen_time + 1)
-    heard = heard_ready_begin.is_set()
-
-    if not heard:
-        with role_lock:
-            role = "initiator"
-        print(f"[role] No peer detected -> acting as initiator.")
+        return "initiator"
     else:
-        # If both heard each other, apply tie-breaker
-        if peer_macs:
-            peer_mac = sorted(peer_macs)[0]  # use first observed
-            if iface_mac.lower() > peer_mac:
-                role = "initiator"
-                print(f"[role] Tie detected. My MAC ({iface_mac}) > peer ({peer_mac}) -> acting as initiator.")
-            else:
-                role = "responder"
-                print(f"[role] Tie detected. My MAC ({iface_mac}) < peer ({peer_mac}) -> acting as responder.")
-        else:
-            role = "responder"
-            print(f"[role] Heard peer but no MAC tie-breaker info -> acting as responder.")
-
-    stop_event.clear()
-    return role
-
+        return "responder"
 
 
 # ---------- Main Exchange Logic ----------
@@ -227,9 +203,6 @@ def run_responder(n_frames, per_index_timeout):
 def run_initiator(n_frames, per_index_timeout):
     print("[initiator] starting initiator mode.")
     iface_mac = safe_get_iface_mac(args.iface)
-
-    ready_frame = build_beacon_frame(iface_mac, SSID_READY_EXCHANGE)
-    tx_queue.put(ready_frame)
 
     sniff_thread = threading.Thread(
         target=lambda: sniff(iface=args.iface, prn=initiator_reply_handler, store=False, timeout=n_frames * 0.01 + 5),
@@ -258,8 +231,8 @@ def run_initiator(n_frames, per_index_timeout):
 
 # ---------- Main ----------
 def main():
-    global args, role
-    parser = argparse.ArgumentParser(description="Threaded RSSI key exchange.")
+    global args
+    parser = argparse.ArgumentParser(description="RSSI key exchange using control-flow-based role election.")
     parser.add_argument("--iface", required=True)
     parser.add_argument("--n", type=int, default=300)
     parser.add_argument("--listen", type=float, default=2.0)
@@ -270,12 +243,11 @@ def main():
     tx_thread = threading.Thread(target=tx_worker, daemon=True)
     tx_thread.start()
 
-    role = threaded_role_election(args.listen)
+    role = negotiate_role(args.listen)
 
     if role == "initiator":
         run_initiator(args.n, args.per_index_timeout)
     else:
-        tx_queue.put(build_beacon_frame(safe_get_iface_mac(args.iface), SSID_READY_EXCHANGE))
         run_responder(args.n, args.per_index_timeout)
 
     stop_event.set()

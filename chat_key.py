@@ -20,6 +20,7 @@ import statistics
 from queue import Queue, Empty
 from random import randint
 from scapy.all import RadioTap, Dot11, Dot11Beacon, Dot11Elt, sniff, sendp, get_if_hwaddr
+import re
 import subprocess
 
 # ---------- Constants ----------
@@ -47,12 +48,38 @@ received_commits = set()
 
 # ---------- Helpers ----------
 def safe_get_iface_mac(iface: str) -> str:
+    """Try multiple methods to obtain the interface's real MAC address, even in monitor mode."""
+    # 1. Try Scapy's built-in function
     try:
-        return get_if_hwaddr(iface)
+        from scapy.arch import get_if_hwaddr
+        mac = get_if_hwaddr(iface)
+        if mac and re.match(r"^([0-9a-f]{2}:){5}[0-9a-f]{2}$", mac.lower()):
+            return mac
     except Exception:
-        rand_mac = "02:%02x:%02x:%02x:%02x:%02x" % tuple(randint(0, 255) for _ in range(5))
-        print(f"[warn] Could not get MAC for {iface}, using {rand_mac}")
-        return rand_mac
+        pass
+
+    # 2. Try reading from `ip link`
+    try:
+        result = subprocess.run(["ip", "link", "show", iface], capture_output=True, text=True)
+        m = re.search(r"link/ether\s+([0-9a-f:]{17})", result.stdout)
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+
+    # 3. Try `ifconfig`
+    try:
+        result = subprocess.run(["ifconfig", iface], capture_output=True, text=True)
+        m = re.search(r"ether\s+([0-9a-f:]{17})", result.stdout)
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+
+    # 4. Final fallback: random locally-administered MAC
+    rand_mac = "02:%02x:%02x:%02x:%02x:%02x" % tuple(randint(0, 255) for _ in range(5))
+    print(f"[warn] Could not get MAC for {iface}, using random {rand_mac}")
+    return rand_mac
 
 def build_beacon_frame(iface_mac, ssid_bytes, index=None, extra_elt=None):
     dot11 = Dot11(type=0, subtype=8, addr1="ff:ff:ff:ff:ff:ff", addr2=iface_mac, addr3=iface_mac)
@@ -255,7 +282,7 @@ def main():
     args = parser.parse_args()
 
     try:
-        subprocess.run(["bash", "monitor-mode.sh", args.iface, "12"], check=False)
+        subprocess.run(["bash", "monitor-mode.sh", args.iface, "2"], check=False)
     except Exception:
         pass
 

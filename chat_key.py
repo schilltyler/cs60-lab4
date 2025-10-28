@@ -275,12 +275,15 @@ def negotiate_role(listen_time=2.0):
 def run_responder(n_frames, per_index_timeout):
     print("[responder] starting responder mode.")
     sniff_thread = threading.Thread(
-        target=lambda: sniff(iface=args.iface, prn=responder_handler, store=False, timeout=n_frames * 0.02 + 30),
+        target=lambda: sniff(iface=args.iface, prn=responder_handler, store=False,
+                             timeout=n_frames * per_index_timeout + 15),
         daemon=True,
     )
     sniff_thread.start()
 
-    max_wait = max(20, n_frames * 0.02 + 10)
+    # wait long enough for entire initiator transmission + margin
+    max_wait = n_frames * per_index_timeout + 30
+
     waited = 0.0
     while waited < max_wait and len(observed_by_responder) < n_frames and not stop_event.is_set():
         time.sleep(0.5)
@@ -431,7 +434,7 @@ def main():
 
     # try to call monitor-mode helper if present (best-effort)
     try:
-        subprocess.run(["bash", "monitor-mode.sh", args.iface, "4"], check=False)
+        subprocess.run(["bash", "monitor-mode.sh", args.iface, "10"], check=False)
     except Exception:
         pass
 

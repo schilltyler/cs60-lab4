@@ -16,7 +16,7 @@ import os
 
 # Configuration
 INTERFACE = "wlan0"
-CHANNEL = 2
+CHANNEL = 3
 NUM_FRAMES = 300
 TIMEOUT_ROLE = 5
 Z_THRESHOLD = 1.5
@@ -300,7 +300,7 @@ class KeyExchangeDevice:
 
         print(f"[+] Generated {len(self.key_bits)} bits from RSSI data.")
 
-    def share_indices(self):
+        def share_indices(self):
         """
         Phase 4 (Initiator): Exchange index positions and build shared key.
         """
@@ -337,6 +337,13 @@ class KeyExchangeDevice:
         common = common_indices[0]
         self.final_key = ''.join(str(self.key_bits[i]) for i in common if i in self.key_bits)
         print(f"[+] Shared key length: {len(self.final_key)} bits")
+
+        # --- Added section ---
+        # Compute SHA-256 hash and print diagnostics
+        final_hash = hashlib.sha256(self.final_key.encode()).hexdigest()
+        print(f"[info] Generated key length: {len(self.final_key)} bits")
+        print(f"[info] Final hash (SHA-256): {final_hash}")
+        # ----------------------
 
     def recv_indices(self):
         """
@@ -375,6 +382,12 @@ class KeyExchangeDevice:
 
         self.final_key = ''.join(str(self.key_bits[i]) for i in common)
         print(f"[+] Shared key length: {len(self.final_key)} bits")
+
+        # Compute SHA-256 hash and print diagnostics
+        final_hash = hashlib.sha256(self.final_key.encode()).hexdigest()
+        print(f"[info] Generated key length: {len(self.final_key)} bits")
+        print(f"[info] Final hash (SHA-256): {final_hash}")
+
 
     def commit_key(self):
         """

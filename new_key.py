@@ -16,7 +16,7 @@ import os
 
 # Configuration
 INTERFACE = "wlan0"
-CHANNEL = 3
+CHANNEL = 4
 NUM_FRAMES = 300
 TIMEOUT_ROLE = 5
 Z_THRESHOLD = 1.5
@@ -300,45 +300,45 @@ class KeyExchangeDevice:
 
         print(f"[+] Generated {len(self.key_bits)} bits from RSSI data.")
 
-        def share_indices(self):
-            print("\n[*] Phase 4: Sharing indices...")
-            indices = sorted(self.key_bits.keys())
-            indices_str = ','.join(map(str, indices))
-            for _ in range(3):
-                sendp(make_frame(FRAME_INDICES, indices_str, dst=self.partner_mac),
-                    iface=INTERFACE, verbose=False)
-                time.sleep(0.05)
+    def share_indices(self):
+        print("\n[*] Phase 4: Sharing indices...")
+        indices = sorted(self.key_bits.keys())
+        indices_str = ','.join(map(str, indices))
+        for _ in range(3):
+            sendp(make_frame(FRAME_INDICES, indices_str, dst=self.partner_mac),
+                iface=INTERFACE, verbose=False)
+            time.sleep(0.05)
 
-            received = [False]
-            common_indices = [None]
+        received = [False]
+        common_indices = [None]
 
-            def handler(pkt):
-                if pkt.haslayer(Dot11) and pkt[Dot11].addr2 == self.partner_mac:
-                    payload = read_payload(pkt)
-                    if FRAME_INDICES in payload:
-                        try:
-                            s = payload.decode().split('KEY_INDICES_')[1]
-                            common_indices[0] = [int(x) for x in s.split(',') if x]
-                            received[0] = True
-                            return True
-                        except:
-                            pass
+        def handler(pkt):
+            if pkt.haslayer(Dot11) and pkt[Dot11].addr2 == self.partner_mac:
+                payload = read_payload(pkt)
+                if FRAME_INDICES in payload:
+                    try:
+                        s = payload.decode().split('KEY_INDICES_')[1]
+                        common_indices[0] = [int(x) for x in s.split(',') if x]
+                        received[0] = True
+                        return True
+                    except:
+                        pass
 
-            sniff(iface=INTERFACE, prn=handler, timeout=10.0,
-                stop_filter=lambda x: received[0])
+        sniff(iface=INTERFACE, prn=handler, timeout=10.0,
+            stop_filter=lambda x: received[0])
 
-            if not received[0]:
-                print("[-] Failed to receive common indices.")
-                sys.exit(1)
+        if not received[0]:
+            print("[-] Failed to receive common indices.")
+            sys.exit(1)
 
-            common = common_indices[0]
-            self.final_key = ''.join(str(self.key_bits[i]) for i in common if i in self.key_bits)
-            print(f"[+] Shared key length: {len(self.final_key)} bits")
+        common = common_indices[0]
+        self.final_key = ''.join(str(self.key_bits[i]) for i in common if i in self.key_bits)
+        print(f"[+] Shared key length: {len(self.final_key)} bits")
 
-            # Compute SHA-256 hash and print diagnostics
-            final_hash = hashlib.sha256(self.final_key.encode()).hexdigest()
-            print(f"[info] Generated key length: {len(self.final_key)} bits")
-            print(f"[info] Final hash (SHA-256): {final_hash}")
+        # Compute SHA-256 hash and print diagnostics
+        final_hash = hashlib.sha256(self.final_key.encode()).hexdigest()
+        print(f"[info] Generated key length: {len(self.final_key)} bits")
+        print(f"[info] Final hash (SHA-256): {final_hash}")
 
     def recv_indices(self):
         """

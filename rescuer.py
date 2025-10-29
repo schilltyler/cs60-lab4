@@ -1,9 +1,18 @@
+"""
+Rescuer script.
+
+Used LLM to modify packet format (to Dot 11).
+"""
+
 from scapy.all import *
 import curses
 import threading
 from queue import Queue
+import subprocess
 
 output = []
+
+subprocess.run(["bash", "monitor-mode.sh", "wlan0", "2"])
 
 def ncurses(q):
     stdscr = curses.initscr()
@@ -29,7 +38,7 @@ def print_packet(packet):
                 output.append(rssi)
 
 def sniffer(q):
-    sniff(iface="wlxbc071d297881", prn=print_packet, store=False)
+    sniff(iface="wlan0", prn=print_packet, store=False)
 
 q = Queue()
 
